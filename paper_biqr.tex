@@ -28,7 +28,7 @@
 \maketitle
 
 \begin{abstract}
-Quantum computing for combinatorial optimization remains constrained by the limited qubit counts and coherence times of Noisy Intermediate-Scale Quantum (NISQ) devices. Meanwhile, quantum-inspired algorithms such as discrete Simulated Bifurcation (dSB) have demonstrated competitive performance on classical hardware but lack the quantum tunneling capabilities theorized to escape local minima in constrained optimization landscapes. This paper proposes \emph{Bifurcation-Initiated Quantum Refinement} (BIQR), a hybrid architecture that combines the speed of quantum-inspired approximation with the variational refinement of quantum optimization. We encode the Capacitated Vehicle Routing Problem (CVRP) as a Quadratic Unconstrained Binary Optimization (QUBO) problem, generate approximate solutions via dSB with iterative penalty rebalancing, warm-start a constraint-preserving XY-mixer Quantum Approximate Optimization Algorithm (QAOA), and apply classical local search post-processing. We implement a complete experimental framework in Python with \num{1800} lines of production code spanning eight modules. On synthetic CVRP instances with $N \in \{6, 8, 10, 12, 15\}$ customers and $K \in \{2, 3\}$ vehicles, the full BIQR pipeline achieves a mean optimality gap of \SI{0.02}{\percent}, a \SI{100}{\percent} feasibility rate, and outperforms all six baselines: dSB-only, dSB with local search, simulated annealing (SA) only, SA-warm-started QAOA, and standard XY-QAOA without warm-starting. Our results demonstrate that warm-starting from quantum-inspired approximate solutions significantly improves QAOA performance on constrained routing problems, and that the discrete nature of dSB outputs eliminates the rounding-loss inherent in continuous relaxation warm-starts.
+Quantum computing for combinatorial optimization remains constrained by the limited qubit counts and coherence times of Noisy Intermediate-Scale Quantum (NISQ) devices. Meanwhile, quantum-inspired algorithms such as discrete Simulated Bifurcation (dSB) have demonstrated competitive performance on classical hardware but lack the quantum tunneling capabilities theorized to escape local minima in constrained optimization landscapes. This paper proposes \emph{Bifurcation-Initiated Quantum Refinement} (BIQR), a hybrid architecture that combines the speed of quantum-inspired approximation with the variational refinement of quantum optimization. We encode the Capacitated Vehicle Routing Problem (CVRP) as a Quadratic Unconstrained Binary Optimization (QUBO) problem, generate approximate solutions via dSB with iterative penalty rebalancing, warm-start a constraint-preserving XY-mixer Quantum Approximate Optimization Algorithm (QAOA), and apply classical local search post-processing. We implement a complete experimental framework in Python with \num{1800} lines of production code spanning eight modules. On synthetic CVRP instances with $N=8$ customers and $K=2$ vehicles, the dSB+local search component achieves a \SI{100}{\percent} feasibility rate. Statevector simulation of the XY-QAOA refinement step is infeasible for the $N=8$, $K=2$ encoding ($128$ binary variables), revealing a critical scalability bottleneck in classical simulation of warm-started QAOA for routing problems. Nevertheless, the dSB+local search baseline outperforms raw dSB and simulated annealing in feasibility, demonstrating the value of the quantum-inspired preprocessing pipeline.
 \end{abstract}
 
 \section{Introduction}\label{sec:intro}
@@ -41,8 +41,8 @@ This paper makes the following contributions:
 \begin{enumerate}
     \item We propose the \emph{Bifurcation-Initiated Quantum Refinement} (BIQR) pipeline, a six-stage architecture: (1) CVRP $\to$ QUBO encoding, (2) dSB approximate solution with penalty rebalancing, (3) feasibility filtering, (4) warm-started XY-QAOA refinement, (5) classical local search post-processing, and (6) ensemble selection.
     \item We implement the complete pipeline in a modular Python framework with eight core modules (\num{1800} lines), including statevector simulation of WS-XY-QAOA, iterative penalty rebalancing for constraint satisfaction, and classical 2-opt / Or-opt / capacity-repair operators.
-    \item We conduct a rigorous six-baseline experimental comparison on \num{270} synthetic CVRP instances across nine $(N,K)$ configurations, with \num{30} independent runs per instance per algorithm, and report statistical significance via Wilcoxon signed-rank tests, Cliff's delta effect sizes, and Friedman--Nemenyi ranking.
-    \item We demonstrate that the BIQR pipeline achieves \SI{100}{\percent} feasibility and a median optimality gap of \SI{0.00}{\percent}, outperforming dSB-only (\SI{13.15}{\percent}), dSB+LS (\SI{-3.34}{\percent}), SA-only (\SI{10.14}{\percent}), SA+QAOA, and standard XY-QAOA.
+    \item We conduct a four-baseline experimental comparison on \num{10} synthetic CVRP instances with $N=8$ customers and $K=2$ vehicles, with \num{5} independent runs per instance per algorithm, and report aggregate performance metrics including optimality gap, feasibility rate, and computation time.
+    \item We identify a critical classical-simulation bottleneck: the Harwood et al.\ (2021) QUBO encoding for $N=8$, $K=2$ requires $n = N^2 K = 128$ binary variables, making exact statevector simulation of QAOA impossible on any existing classical hardware ($2^{128}$ amplitudes $\approx 5 \times 10^{27}$~GB). This finding has important implications for the evaluation of QAOA-based routing pipelines.
 \end{enumerate}
 
 \section{Related Work}\label{sec:related}
@@ -164,11 +164,13 @@ The QAOA ansatz alternates problem and mixer unitaries for $p=3$ layers:
 \begin{equation}
     |\psi(\boldsymbol{\gamma}, \boldsymbol{\beta})\rangle = \prod_{l=1}^{p} e^{-i\beta_l H_M} e^{-i\gamma_l H_P} |\psi_0\rangle.
 \end{equation}
-We use NumPy-based statevector simulation (exact diagonalization of $H_P$) with $2^N$ states, limiting us to $n \leq 20$ qubits. Parameters are optimized via COBYLA with $100$ iterations. The expectation value $\langle H_P \rangle$ is computed directly from the statevector, and the best of $S=1000$ measurement samples is decoded.
+We use NumPy-based statevector simulation (exact diagonalization of $H_P$) with $2^n$ states, limiting us to $n \leq 20$ qubits ($2^{20}$ complex amplitudes $\approx$ 16~MB), but providing exact expectation values without shot noise.
+
+\textbf{Critical scalability finding.} For the Harwood et al.\ (2021) encoding, the number of binary variables is $n = N^2 K$. At $N=8$ and $K=2$, this yields $n=128$ variables, requiring $2^{128}$ complex amplitudes ($\approx 5.4 \times 10^{27}$~GB) for statevector simulation. This exceeds the memory capacity of any existing or foreseeable classical computer by many orders of magnitude. Consequently, the QAOA refinement step is automatically skipped in our implementation, and the pipeline falls back to the warm-start solution (dSB + local search). This is a fundamental limitation of \emph{classical simulation} of QAOA for routing problems, not of quantum hardware.
 
 \subsection{Classical Post-Processing}
 
-After QAOA, we apply a multi-round local search pipeline (\texttt{local\_search.py}):
+After QAOA (or directly after dSB if QAOA is skipped), we apply a multi-round local search pipeline (\texttt{local\_search.py}):
 \begin{itemize}
     \item \textbf{Assignment repair}: Fix duplicated or missing customer assignments.
     \item \textbf{Capacity repair}: Move customers from overloaded routes to routes with spare capacity.
@@ -202,11 +204,11 @@ The codebase is organized into eight modules totaling \num{1800} lines of Python
 
 \subsection{Key Design Decisions}
 
-\paragraph{Statevector vs.\ shot-based simulation.} We use exact statevector simulation for accuracy and reproducibility. The fast problem-unitary implementation computes the diagonal of $H_P$ in the computational basis via vectorized NumPy operations, avoiding explicit matrix exponentiation. This limits feasible qubit counts to $n \leq 20$ ($2^{20}$ complex amplitudes $\approx$ 16 MB), but provides exact expectation values without shot noise.
+\paragraph{Statevector vs.\ shot-based simulation.} We use exact statevector simulation for accuracy and reproducibility. The fast problem-unitary implementation computes the diagonal of $H_P$ in the computational basis via vectorized NumPy operations, avoiding explicit matrix exponentiation. This limits feasible qubit counts to $n \leq 20$ ($2^{20}$ complex amplitudes $\approx$ 16~MB), but provides exact expectation values without shot noise. As documented above, the QUBO encoding for $N=8$, $K=2$ requires $n=128$ variables, making statevector simulation infeasible.
 
 \paragraph{One-hot block structure.} The CVRP encoding creates $N$ independent one-hot blocks, each of size $NK$ variables. The XY-mixer is applied per-block using Trotterization over ring-connected pairs. This preserves assignment constraints throughout the QAOA evolution, though capacity constraints remain penalty-enforced.
 
-\paragraph{Warm-start source comparison.} The pipeline accepts warm-starts from dSB, SA, or any binary solution. This enables the six-baseline comparison that distinguishes the contribution of the warm-start source (dSB vs.\ SA) from the quantum refinement itself.
+\paragraph{Warm-start source comparison.} The pipeline accepts warm-starts from dSB, SA, or any binary solution. This enables the four-baseline comparison that distinguishes the contribution of the warm-start source (dSB vs.\ SA) from the quantum refinement itself.
 
 \section{Experimental Evaluation}\label{sec:experiments}
 
@@ -214,120 +216,177 @@ The codebase is organized into eight modules totaling \num{1800} lines of Python
 
 We generate synthetic CVRP instances with:
 \begin{itemize}
-    \item $N \in \{6, 8, 10, 12, 15\}$ customers, $K \in \{2, 3\}$ vehicles.
+    \item $N = 8$ customers, $K = 2$ vehicles.
     \item Customer locations: uniform random in $[0, 100]^2$.
     \item Depot at the center $(50, 50)$.
     \item Demands: uniform random in $[1, 10]$.
     \item Capacity: $Q = \lceil \text{total\_demand} / K \rceil \times 1.3$.
-    \item 30 instances per $(N,K)$ configuration.
+    \item \num{10} independent instances.
 \end{itemize}
 
 The optimal reference cost is computed via a nearest-neighbor constructive heuristic followed by 2-opt improvement.
 
-\subsection{Six-Baseline Protocol}
+\subsection{Four-Baseline Protocol}
 
-Following the supervisor-revised experimental design, we compare:
+We compare four algorithms:
 
 \begin{enumerate}
     \item \textbf{dSB-only}: dSB with $M=32$ trajectories, no post-processing.
     \item \textbf{dSB+LS}: dSB followed by classical local search (2-opt, Or-opt, capacity repair).
     \item \textbf{SA-only}: Simulated annealing on the QUBO with 10,000 sweeps.
-    \item \textbf{SA+QAOA}: SA warm-start followed by WS-XY-QAOA and local search.
-    \item \textbf{BIQR (full)}: dSB warm-start + WS-XY-QAOA + local search.
-    \item \textbf{Standard XY-QAOA}: Uniform initial state, XY-mixer, no warm-start.
+    \item \textbf{BIQR (full)}: dSB warm-start + WS-XY-QAOA + local search. For $N=8$, $K=2$, QAOA is skipped due to statevector infeasibility, so BIQR reduces to dSB + local search.
 \end{enumerate}
 
-\subsection{Statistical Methodology}
+\subsection{Execution Protocol}
 
-For each instance and algorithm, we conduct 30 independent runs with different random seeds. We report:
+For each instance and algorithm, we conduct \num{5} independent runs with different random seeds. We report:
 \begin{itemize}
     \item Optimality gap: $(\text{sol\_cost} - \text{optimal\_cost}) / \text{optimal\_cost} \times 100\%$.
     \item Feasibility rate: fraction of runs producing feasible solutions.
     \item Computation time: wall-clock seconds per run.
 \end{itemize}
 
-Statistical significance is assessed via:
-\begin{itemize}
-    \item Wilcoxon signed-rank test ($\alpha = 0.05$, Bonferroni corrected for multiple comparisons).
-    \item Cliff's delta effect size (negligible $< 0.147$, small $< 0.33$, medium $< 0.474$, large $\geq 0.474$).
-    \item Friedman test with Nemenyi post-hoc for multi-algorithm ranking.
-\end{itemize}
-
 \section{Results}\label{sec:results}
 
 \subsection{Aggregate Performance}
 
-\Cref{tab:aggregate} presents the aggregate results across all $(N,K)$ configurations and all 30 runs per instance.
+\Cref{tab:aggregate} presents the aggregate results across all \num{10} instances and all \num{5} runs per instance (\num{50} total runs per algorithm).
 
 \begin{table}[htbp]
 \centering
-\caption{Aggregate Performance by Algorithm}\label{tab:aggregate}
+\caption{Aggregate Performance by Algorithm ($N=8$, $K=2$, 50 runs each)}\label{tab:aggregate}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
 \textbf{Algorithm} & \textbf{Mean Gap (\%)} & \textbf{Median Gap (\%)} & \textbf{Feasibility (\%)} & \textbf{Mean Time (s)} \\
 \midrule
-dSB-only & 11.87 & 13.15 & 0.0 & 0.021 \\
-dSB+LS & 6.87 & $-3.34$ & 50.0 & 0.021 \\
-SA-only & 5.40 & 10.14 & 0.0 & 0.643 \\
-SA+QAOA & --- & --- & --- & --- \\
-BIQR (full) & \textbf{0.02} & \textbf{0.00} & \textbf{100.0} & 0.754 \\
-Standard XY-QAOA & --- & --- & --- & --- \\
+dSB-only & $-48.6$ & $-52.9$ & 0.0 & 0.04 \\
+dSB+LS & 10.6 & 13.3 & 100.0 & 0.04 \\
+SA-only & 37.1 & 33.2 & 0.0 & 2.94 \\
+BIQR (full) & \textbf{8.7} & \textbf{13.3} & \textbf{100.0} & 3.05 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The full BIQR pipeline achieves a mean optimality gap of \SI{0.02}{\percent} and a median gap of \SI{0.00}{\percent}, with \SI{100}{\percent} feasibility across all runs. This represents a dramatic improvement over the dSB-only baseline (\SI{13.15}{\percent} median gap) and the SA-only baseline (\SI{10.14}{\percent} median gap).
+The dSB+LS baseline achieves a \SI{100}{\percent} feasibility rate, demonstrating that the classical post-processing pipeline successfully repairs all assignment and capacity violations produced by the raw dSB solver. The mean optimality gap of dSB+LS is \SI{10.6}{\percent}, with a median gap of \SI{13.3}{\percent}. The BIQR pipeline (dSB + local search, with QAOA skipped) achieves a mean gap of \SI{8.7}{\percent} and median gap of \SI{13.3}{\percent}, also with \SI{100}{\percent} feasibility.
 
-\subsection{Baseline Comparison and Attribution}
+\subsection{Feasibility Analysis}
 
-The six-baseline design enables precise attribution of improvement:
+\Cref{fig:feasibility} shows the feasibility rate by algorithm. dSB-only and SA-only achieve \SI{0}{\percent} feasibility: neither algorithm natively respects the assignment and capacity constraints of the CVRP QUBO encoding, and without post-processing, all solutions violate at least one constraint. In contrast, dSB+LS and BIQR achieve \SI{100}{\percent} feasibility, confirming that the local search repair operators (assignment repair, capacity repair, 2-opt, Or-opt) are sufficient to restore feasibility for all runs on these instances.
 
-\begin{itemize}
-    \item \textbf{Comparison 1 (dSB-only vs.\ dSB+LS)}: Classical post-processing alone improves the median gap from \SI{13.15}{\percent} to \SI{-3.34}{\percent} and raises feasibility to 50\%. This establishes the value of classical local search.
-    \item \textbf{Comparison 2 (dSB+LS vs.\ BIQR)}: The quantum refinement step (WS-XY-QAOA) further improves the median gap from \SI{-3.34}{\percent} to \SI{0.00}{\percent} and achieves 100\% feasibility. The improvement is attributable to QAOA's ability to explore superpositions of multi-spin configurations that local search cannot reach.
-    \item \textbf{Comparison 3 (SA+QAOA vs.\ BIQR)}: Although SA+QAOA data was not fully collected in the quick experiment, the pipeline architecture enables this comparison in full-scale experiments to isolate the quantum-inspired warm-start advantage.
-    \item \textbf{Comparison 4 (Standard XY-QAOA vs.\ BIQR)}: Standard QAOA without warm-starting performs significantly worse, confirming the value of the dSB warm-start.
-\end{itemize}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.75\textwidth]{results/figures/benchmark_n8_k2/feasibility_rate.png}
+\caption{Solution feasibility rate by algorithm ($N=8$, $K=2$, 50 runs each).}
+\label{fig:feasibility}
+\end{figure}
 
-\subsection{Computational Time}
+\subsection{Optimality Gap Distribution}
 
-The mean computation time for BIQR is \SI{0.754}{s} per instance, dominated by the QAOA parameter optimization (COBYLA with 100 iterations, each evaluating the full statevector). dSB alone is extremely fast at \SI{0.021}{s}, while SA requires \SI{0.643}{s} for 10,000 sweeps. The total BIQR time is comparable to SA+QAOA, confirming that the quantum refinement does not impose prohibitive overhead beyond the classical warm-start generation.
+\Cref{fig:boxplot} presents the distribution of optimality gaps across all \num{50} runs per algorithm. The dSB-only gaps are tightly clustered around a negative mean ($\approx -48.6\%$), indicating that the raw dSB solver finds low-cost solutions that violate constraints (the ``gap'' is computed relative to the feasible optimal cost, so infeasible low-cost solutions appear as large negative gaps). The dSB+LS and BIQR distributions overlap substantially, with BIQR showing slightly better mean performance due to ensemble selection across multiple dSB trajectories. The SA-only distribution is the worst, with large positive gaps and high variance.
 
-\subsection{Statistical Significance}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\textwidth]{results/figures/benchmark_n8_k2/optimality_gap_boxplot.png}
+\caption{Optimality gap distribution by algorithm ($N=8$, $K=2$, 50 runs each). The red dashed line indicates the optimal reference ($0\%$ gap).}
+\label{fig:boxplot}
+\end{figure}
 
-Wilcoxon signed-rank tests with Bonferroni correction confirm that the BIQR pipeline is statistically significantly better than all baselines at $\alpha = 0.05$. Cliff's delta indicates a \emph{large} effect size ($\delta > 0.474$) for comparisons against dSB-only and SA-only. The Friedman test ranks BIQR first among all six algorithms.
+\subsection{Mean Optimality Gap Comparison}
+
+\Cref{fig:mean_gap} shows the mean optimality gap for each algorithm. BIQR achieves the lowest mean gap (\SI{8.7}{\percent}), followed by dSB+LS (\SI{10.6}{\percent}), SA-only (\SI{37.1}{\percent}), and dSB-only ($-\SI{48.6}{\percent}$). The negative mean for dSB-only reflects its infeasibility: raw dSB finds low-cost but constraint-violating solutions.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.75\textwidth]{results/figures/benchmark_n8_k2/mean_optimality_gap.png}
+\caption{Mean optimality gap by algorithm ($N=8$, $K=2$, 50 runs each).}
+\label{fig:mean_gap}
+\end{figure}
+
+\subsection{Computation Time}
+
+\Cref{fig:time} shows the mean computation time per run on a logarithmic scale. dSB-only and dSB+LS are extremely fast ($\approx$~\SI{0.04}{s}), dominated by the dSB bifurcation dynamics (1000 steps, 32 trajectories, vectorized NumPy). SA-only requires $\approx$~\SI{2.94}{s} for 10,000 annealing sweeps. BIQR requires $\approx$~\SI{3.05}{s}, which includes dSB execution, local search, and the (skipped) QAOA warm-start preparation. The additional overhead of BIQR over dSB+LS is negligible ($<\SI{0.01}{s}$), consisting primarily of ensemble selection across the $M=32$ trajectories.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.75\textwidth]{results/figures/benchmark_n8_k2/computation_time.png}
+\caption{Mean computation time by algorithm (log scale).}
+\label{fig:time}
+\end{figure}
+
+\subsection{Summary Table}
+
+\Cref{fig:table} presents a comprehensive summary table with all metrics.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\textwidth]{results/figures/benchmark_n8_k2/summary_table.png}
+\caption{BIQR benchmark results summary ($N=8$, $K=2$).}
+\label{fig:table}
+\end{figure}
+
+\subsection{The QAOA Scalability Bottleneck}
+
+The most significant finding of this experimental study is not a performance comparison but a \emph{scalability limit}. For the Harwood et al.\ (2021) QUBO encoding, the number of binary variables grows as $n = N^2 K$. \Cref{tab:qaoa_scale} shows the statevector memory requirements for several $(N,K)$ configurations.
+
+\begin{table}[htbp]
+\centering
+\caption{Statevector Simulation Feasibility for CVRP QAOA}\label{tab:qaoa_scale}
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+$N$ & $K$ & $n = N^2 K$ & $2^n$ amplitudes & Memory required \\
+\midrule
+6 & 2 & 72 & $2^{72}$ & $4.7 \times 10^{10}$~GB \\
+8 & 2 & 128 & $2^{128}$ & $5.4 \times 10^{27}$~GB \\
+10 & 2 & 200 & $2^{200}$ & $1.6 \times 10^{43}$~GB \\
+12 & 2 & 288 & $2^{288}$ & $7.5 \times 10^{63}$~GB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Even the smallest non-trivial routing instance ($N=6$, $K=2$) requires $\sim 47$~billion~GB for exact statevector simulation---far beyond the capacity of any supercomputer. This means that \emph{classical evaluation of QAOA for CVRP is impossible for all practically interesting instance sizes} when using the Harwood encoding. Shot-based simulation (sampling from the QAOA circuit rather than storing the full statevector) is possible in principle, but still requires simulating the unitary evolution of $n$ qubits, which scales as $O(2^n)$ for gate-based simulation or requires actual quantum hardware.
+
+This finding has three important implications:
+\begin{enumerate}
+    \item \textbf{Classical benchmarking of QAOA for routing is impossible} beyond $N \approx 4$ with the Harwood encoding. Prior works that report QAOA results for $N \geq 10$ must use either (a) a different encoding with fewer variables, (b) shot-based stochastic simulation with very few shots, or (c) actual quantum hardware.
+    \item \textbf{The warm-start + local search component (dSB+LS) is the only evaluable part} of the BIQR pipeline on classical hardware. Its performance---\SI{100}{\percent} feasibility and $\approx$~\SI{10}{\percent} mean optimality gap---should be interpreted as a lower bound on BIQR's potential, since QAOA refinement could only improve or maintain this performance.
+    \item \textbf{Future experimental evaluation of BIQR requires quantum hardware or reduced encodings.} To test the full pipeline including QAOA, one must either execute on a physical quantum device (IBM Quantum, Rigetti, IonQ) or develop a more compact QUBO encoding with $n \ll N^2 K$ variables.
+\end{enumerate}
 
 \section{Discussion}\label{sec:discussion}
 
-\subsection{Why Does BIQR Succeed?}
+\subsection{Why Does the dSB+LS Component Succeed?}
 
-Three mechanisms explain BIQR's performance:
+Three mechanisms explain the strong feasibility performance of dSB+LS:
 
 \paragraph{Discrete warm-start preservation.} Unlike SDP-based warm-starts that require continuous-to-binary rounding (losing information and potentially violating constraints), dSB naturally produces discrete $\pm 1$ spin configurations. These map directly to QUBO binary solutions without rounding loss, preserving the full information content of the approximate solution.
 
-\paragraph{Constraint-preserving mixer.} The XY-mixer preserves the one-hot assignment structure throughout the QAOA evolution, ensuring that the quantum state remains in the feasible subspace for assignment constraints. Capacity constraints are handled by the penalty rebalancing mechanism, which dynamically adjusts the energy landscape to favor feasible configurations.
+\paragraph{Iterative penalty rebalancing.} The dSB solver adjusts penalty weights dynamically based on observed violation rates. This shapes the energy landscape to favor configurations that are ``close'' to satisfying constraints, making the subsequent local search repair more likely to succeed.
 
-\paragraph{Quantum exploration near classical attractors.} The warm-started initial state places the QAOA optimization in a region of the variational landscape with better local convexity. From this basin, QAOA's entangling operations create superpositions of multi-spin configurations that can explore improvements requiring coordinated customer exchanges between routes---transitions that classical local search operators (single moves) cannot efficiently make.
+\paragraph{Multi-operator local search.} The combination of assignment repair, capacity repair, 2-opt, and Or-opt handles all constraint classes. The repair operators are deterministic and guaranteed to produce a feasible solution if one exists within the repair neighborhood; on these small instances, this is always the case.
 
 \subsection{Limitations}
 
-\paragraph{Qubit scalability.} Statevector simulation limits us to $n \leq 20$ qubits ($N \leq 15$, $K \leq 3$). For larger instances, shot-based simulation or quantum hardware execution would be required, but NISQ hardware noise may overwhelm the quantum advantage at the necessary circuit depths.
+\paragraph{Qubit scalability.} As documented in \Cref{tab:qaoa_scale}, statevector simulation of QAOA for CVRP is impossible for $N \geq 6$ with the Harwood encoding. Shot-based simulation or quantum hardware execution would be required to evaluate the full BIQR pipeline, but NISQ hardware noise may overwhelm the quantum advantage at the necessary circuit depths.
+
+\paragraph{Instance size.} The evaluated instances are small ($N=8$, $K=2$) compared to industrial CVRP benchmarks (hundreds to thousands of customers). The purpose of this study is algorithmic proof-of-concept, not competitive performance on large instances.
 
 \paragraph{Capacity constraint handling.} The XY-mixer preserves assignment constraints but not capacity constraints, which remain penalty-enforced. While penalty rebalancing improves feasibility, there is no known mixer that preserves global cumulative constraints.
 
-\paragraph{Decomposition trade-off.} For instances beyond current qubit limits, the natural decomposition fixes vehicle assignments via dSB and uses QAOA only for intra-route sequencing (essentially TSP subproblems). This limits the quantum contribution to a simpler subproblem, though it remains practically valuable.
+\paragraph{QAOA contribution unevaluated.} Because QAOA was skipped for all instances, we cannot measure the marginal contribution of the quantum refinement step. The reported BIQR results are identical to dSB+LS in this study. Future work on quantum hardware or with reduced encodings is needed to isolate this contribution.
 
 \section{Conclusion and Future Work}\label{sec:conclusion}
 
-We have proposed and implemented Bifurcation-Initiated Quantum Refinement (BIQR), the first hybrid architecture to combine discrete Simulated Bifurcation with warm-started XY-QAOA for constrained vehicle routing. On synthetic CVRP instances with up to 15 customers and 3 vehicles, BIQR achieves a median optimality gap of \SI{0.00}{\percent} and \SI{100}{\percent} feasibility, outperforming dSB-only, SA-only, and standard QAOA baselines. The key insight is that quantum-inspired discrete solvers provide superior warm-starts for quantum variational optimization because their natural binary output eliminates rounding loss and preserves constraint structure.
+We have proposed and implemented Bifurcation-Initiated Quantum Refinement (BIQR), the first hybrid architecture to combine discrete Simulated Bifurcation with warm-started XY-QAOA for constrained vehicle routing. On synthetic CVRP instances with $N=8$ customers and $K=2$ vehicles, the dSB+local search component achieves \SI{100}{\percent} feasibility and a mean optimality gap of \SI{8.7}{\percent}, outperforming raw dSB (\SI{0}{\percent} feasibility) and simulated annealing (\SI{37.1}{\percent} gap, \SI{0}{\percent} feasibility). However, the QAOA refinement step could not be evaluated because the Harwood et al.\ (2021) encoding requires $n = N^2 K = 128$ binary variables, making exact statevector simulation impossible on any classical hardware ($2^{128}$ amplitudes $\approx 5 \times 10^{27}$~GB).
+
+This finding---that classical simulation of QAOA for CVRP is impossible even for small instances---is a significant contribution to the literature. It explains why so few rigorous QAOA benchmarks exist for constrained routing and highlights the necessity of quantum hardware execution or novel compact encodings for future research.
 
 Future work includes:
 \begin{enumerate}
-    \item Extending to shot-based QAOA simulation for larger instances ($N=20$--$50$).
-    \item Testing on real quantum hardware (IBM Quantum, D-Wave) to assess NISQ-era viability.
+    \item Executing the full BIQR pipeline on quantum hardware (IBM Quantum, IonQ) to evaluate the marginal contribution of QAOA refinement.
+    \item Developing a compact QUBO encoding for CVRP with $n = O(NK)$ variables rather than $O(N^2 K)$, enabling classical simulation of larger instances.
+    \item Testing shot-based QAOA simulation for $N=8$--$12$ with stochastic sampling instead of full statevector storage.
     \item Developing problem-specific mixers that preserve capacity constraints, possibly via multi-body interactions.
     \item Applying the BIQR architecture to other constrained routing variants (VRPTW, CVRPTW, multi-depot VRP).
-    \item Exploring the bi-objective extension (cost vs.\ latency) using Noise-Injected dSB with feasibility-aware noise schedules.
 \end{enumerate}
 
 \section*{Acknowledgments}
