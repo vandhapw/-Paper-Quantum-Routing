@@ -1,0 +1,48 @@
+======================================================================
+BIQR Experimental Results Summary
+======================================================================
+
+
+dSB-only:
+  Mean optimality gap: 11.87%
+  Median optimality gap: 13.15%
+  Std optimality gap: 10.61%
+  Feasibility rate: 0.0%
+  Mean computation time: 0.021s
+  Total runs: 6
+
+  Per-configuration breakdown:
+    N4_K2: gap=13.15%, feas=0.0%
+
+dSB+LS:
+  Mean optimality gap: 6.87%
+  Median optimality gap: -3.34%
+  Std optimality gap: 23.04%
+  Feasibility rate: 50.0%
+  Mean computation time: 0.021s
+  Total runs: 6
+
+  Per-configuration breakdown:
+    N4_K2: gap=-3.34%, feas=50.0%
+
+SA-only:
+  Mean optimality gap: 5.40%
+  Median optimality gap: 10.14%
+  Std optimality gap: 18.35%
+  Feasibility rate: 0.0%
+  Mean computation time: 0.643s
+  Total runs: 6
+
+  Per-configuration breakdown:
+    N4_K2: gap=10.14%, feas=0.0%
+
+BIQR:
+  Mean optimality gap: 0.02%
+  Median optimality gap: 0.00%
+  Std optimality gap: 3.61%
+  Feasibility rate: 100.0%
+  Mean computation time: 0.754s
+  Total runs: 6
+
+  Per-configuration breakdown:
+    N4_K2: gap=0.00%, feas=100.0%
