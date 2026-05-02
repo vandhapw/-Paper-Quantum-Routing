@@ -84,6 +84,16 @@ The objective is to find $K$ routes $\{R_1, \dots, R_K\}$, each starting and end
     \item The total distance $\sum_{k=1}^{K} \text{dist}(R_k)$ is minimized.
 \end{enumerate}
 
+\paragraph{Solution representation.} A feasible solution to the CVRP instance is a set of $K$ routes $\mathcal{R} = \{R_1, \dots, R_K\}$, where each route $R_k = (0, i_{k,1}, i_{k,2}, \dots, i_{k,m_k}, 0)$ is an ordered sequence of customers visited by vehicle $k$, starting and ending at the depot. The solution is encoded in the binary decision variables as
+\begin{equation}\label{eq:solution}
+    x_{i,j,k} =
+    \begin{cases}
+        1 & \text{if customer } i \text{ is the } j\text{-th visit of vehicle } k,\\
+        0 & \text{otherwise.}
+    \end{cases}
+\end{equation}
+Given a feasible binary assignment $\mathbf{x}$, the corresponding routes are reconstructed by, for each vehicle $k$, collecting all customers with $x_{i,j,k}=1$ and sorting them by position index $j$. The \textbf{output} of the BIQR pipeline is precisely such a feasible route set $\mathcal{R}^*$ with minimal total distance.
+
 \subsection{QUBO Encoding}\label{sec:qubo}
 
 We adopt the Harwood et al.\ (2021) QUBO encoding. Decision variables are $x_{i,j,k} \in \{0,1\}$, where $x_{i,j,k} = 1$ if customer $i$ is the $j$-th visit of vehicle $k$. The total number of binary variables is $n = N^2 K$.
@@ -123,6 +133,32 @@ The BIQR pipeline consists of six stages, orchestrated by the \texttt{pipeline.p
     \item \textbf{Classical Post-Processing} (\texttt{local\_search.py}): 2-opt, Or-opt, capacity repair.
     \item \textbf{Ensemble Selection}: Best solution across all warm-starts.
 \end{enumerate}
+
+\begin{algorithm}[htbp]
+\caption{BIQR Pipeline}\label{alg:biqr}
+\begin{algorithmic}[1]
+\Require CVRP instance $\mathcal{I} = (N, K, Q, \{d_i\}, D)$
+\Ensure Feasible routes $\{R_1, \dots, R_K\}$
+\State Encode $\mathcal{I} \to$ QUBO $(h, Q)$ via Harwood encoding \eqref{eq:qubo}
+\State Convert QUBO $\to$ Ising $(h', J)$ via $s_i = 1 - 2x_i$
+\State Run dSB with $M=32$ trajectories, $R=5$ penalty rebalancing rounds
+\For{each trajectory $m \in \{1, \dots, M\}$}
+    \State Decode spin config $\mathbf{s}^{(m)} \to$ binary variables $\mathbf{x}^{(m)}$
+    \State Decode $\mathbf{x}^{(m)} \to$ candidate routes $\{R_1^{(m)}, \dots, R_K^{(m)}\}$
+    \If{$\{R_k^{(m)}\}$ is infeasible}
+        \State Apply assignment repair and capacity repair
+    \EndIf
+    \If{$n \leq 20$ (statevector feasible)}
+        \State Prepare warm-start state $|\psi_0\rangle$ from $\mathbf{x}^{(m)}$
+        \State Run WS-XY-QAOA with $p=3$, optimize $(\boldsymbol{\gamma}, \boldsymbol{\beta})$ via COBYLA
+        \State Decode best QAOA sample $\to$ refined routes
+    \EndIf
+    \State Apply local search: 2-opt, Or-opt, capacity repair (max 3 rounds)
+    \State Compute total distance $C^{(m)} = \sum_k \text{dist}(R_k^{(m)})$
+\EndFor
+\State \Return $\{R_1^{(m^*)}, \dots, R_K^{(m^*)}\}$ where $m^* = \arg\min_m C^{(m)}$
+\end{algorithmic}
+\end{algorithm}
 
 \subsection{Discrete Simulated Bifurcation (dSB)}
 
